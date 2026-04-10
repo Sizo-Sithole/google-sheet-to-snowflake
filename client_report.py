@@ -4,6 +4,10 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 from snowflake.sqlalchemy import URL
 
+sheet_id = os.getenv("GOOGLE_SHEET_ID")
+gid = os.getenv("GOOGLE_SHEET_GID")
+snowflake_account = os.getenv("SNOWFLAKE_ACCOUNT")
+
 
 def require_env(name: str) -> str:
     value = os.getenv(name)
