@@ -3,6 +3,8 @@ import sys
 import pandas as pd
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
+import pandas as pd
+import pyarrow as pa
 
 
 def require_env(name: str) -> str:
