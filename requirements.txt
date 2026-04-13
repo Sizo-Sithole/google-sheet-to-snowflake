@@ -2,3 +2,5 @@ pandas
 sqlalchemy
 snowflake-sqlalchemy
 snowflake-connector-python
+pandas==2.2.3
+pyarrow==18.1.0
