@@ -3,7 +3,6 @@ import sys
 import pandas as pd
 import snowflake.connector
 from snowflake.connector.pandas_tools import write_pandas
-import pandas as pd
 import pyarrow as pa
 
 
@@ -24,6 +23,18 @@ def load_google_sheet() -> pd.DataFrame:
     df = pd.read_csv(url)
     print(f"Loaded {len(df)} rows and {len(df.columns)} columns.")
     print(df.head())
+
+    # Convert Date column to datetime
+    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+
+    # Fixed reference date
+    reference_date = pd.Timestamp("2026-02-14")
+    start_date = reference_date - pd.Timedelta(days=7)
+
+    # Keep only rows from 1 week ago up to reference date
+    df = df[(df["Date"] >= start_date) & (df["Date"] <= reference_date)].copy()
+
+    print(f"Filtered rows from {start_date.date()} to {reference_date.date()}: {len(df)} rows")
 
     # Clean column names for Snowflake
     df.columns = [
@@ -71,7 +82,6 @@ def upload_to_snowflake(df: pd.DataFrame) -> None:
         print(f"Warehouse: {result[2]}")
         print(f"Role: {result[3]}")
 
-        # Drop table if replacing
         cur.execute(f"DROP TABLE IF EXISTS {database}.{schema}.{table_name}")
         print(f"Dropped existing table if it existed: {database}.{schema}.{table_name}")
 
