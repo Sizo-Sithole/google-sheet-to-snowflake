@@ -22,19 +22,31 @@ def load_google_sheet() -> pd.DataFrame:
 
     df = pd.read_csv(url)
     print(f"Loaded {len(df)} rows and {len(df.columns)} columns.")
+    print("Initial preview:")
     print(df.head())
+
+    if "Date" not in df.columns:
+        raise KeyError("Expected column 'Date' not found in Google Sheet.")
 
     # Convert Date column to datetime
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
 
-    # Fixed reference date
+    # Remove rows with invalid dates
+    df = df[df["Date"].notna()].copy()
+
+    # Fixed reference date: 14 Feb 2026
     reference_date = pd.Timestamp("2026-02-14")
     start_date = reference_date - pd.Timedelta(days=7)
 
-    # Keep only rows from 1 week ago up to reference date
+    # Keep only rows from the last 7 days up to the reference date
     df = df[(df["Date"] >= start_date) & (df["Date"] <= reference_date)].copy()
 
+    # Convert date to string format for Snowflake
+    df["Date"] = df["Date"].dt.strftime("%Y-%m-%d")
+
     print(f"Filtered rows from {start_date.date()} to {reference_date.date()}: {len(df)} rows")
+    print("Filtered preview:")
+    print(df.head())
 
     # Clean column names for Snowflake
     df.columns = [
@@ -46,6 +58,9 @@ def load_google_sheet() -> pd.DataFrame:
            .upper()
         for col in df.columns
     ]
+
+    print("Column types before upload:")
+    print(df.dtypes)
 
     return df
 
@@ -82,6 +97,7 @@ def upload_to_snowflake(df: pd.DataFrame) -> None:
         print(f"Warehouse: {result[2]}")
         print(f"Role: {result[3]}")
 
+        # Drop and recreate table each run
         cur.execute(f"DROP TABLE IF EXISTS {database}.{schema}.{table_name}")
         print(f"Dropped existing table if it existed: {database}.{schema}.{table_name}")
 
@@ -111,8 +127,12 @@ def upload_to_snowflake(df: pd.DataFrame) -> None:
 
 if __name__ == "__main__":
     try:
+        print("Pandas version:", pd.__version__)
+        print("PyArrow version:", pa.__version__)
+
         data = load_google_sheet()
         upload_to_snowflake(data)
+
     except Exception as exc:
         print(f"Pipeline failed: {exc}")
         sys.exit(1)
