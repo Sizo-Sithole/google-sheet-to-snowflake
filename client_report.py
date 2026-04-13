@@ -1,12 +1,8 @@
 import os
 import sys
 import pandas as pd
-from sqlalchemy import create_engine, text
-from snowflake.sqlalchemy import URL
-
-sheet_id = os.getenv("GOOGLE_SHEET_ID")
-gid = os.getenv("GOOGLE_SHEET_GID")
-snowflake_account = os.getenv("SNOWFLAKE_ACCOUNT")
+import snowflake.connector
+from snowflake.connector.pandas_tools import write_pandas
 
 
 def require_env(name: str) -> str:
@@ -26,42 +22,78 @@ def load_google_sheet() -> pd.DataFrame:
     df = pd.read_csv(url)
     print(f"Loaded {len(df)} rows and {len(df.columns)} columns.")
     print(df.head())
+
+    # Clean column names for Snowflake
+    df.columns = [
+        col.strip()
+           .replace(" ", "_")
+           .replace("/", "_")
+           .replace("-", "_")
+           .replace(".", "_")
+           .upper()
+        for col in df.columns
+    ]
+
     return df
 
 
-def get_engine():
-    snowflake_url = URL(
+def get_connection():
+    return snowflake.connector.connect(
         account=require_env("SNOWFLAKE_ACCOUNT"),
         user=require_env("SNOWFLAKE_USER"),
         password=require_env("SNOWFLAKE_PASSWORD"),
+        warehouse=require_env("SNOWFLAKE_WAREHOUSE"),
         database=require_env("SNOWFLAKE_DATABASE"),
         schema=require_env("SNOWFLAKE_SCHEMA"),
-        warehouse=require_env("SNOWFLAKE_WAREHOUSE"),
         role=require_env("SNOWFLAKE_ROLE"),
     )
-    return create_engine(snowflake_url)
 
 
 def upload_to_snowflake(df: pd.DataFrame) -> None:
-    table_name = os.getenv("SNOWFLAKE_TABLE", "HARVEST")
+    table_name = require_env("SNOWFLAKE_TABLE").upper()
+    database = require_env("SNOWFLAKE_DATABASE")
+    schema = require_env("SNOWFLAKE_SCHEMA")
 
-    engine = get_engine()
-    connection = None
+    conn = None
+    cur = None
+
     try:
-        connection = engine.connect()
-        connection.execute(text("SELECT CURRENT_VERSION()"))
-        print("Successfully connected to Snowflake.")
+        conn = get_connection()
+        cur = conn.cursor()
 
-        # Write DataFrame to Snowflake
-        df.to_sql(table_name, con=engine, index=False, if_exists="replace", method="multi")
-        print(
-            f"DataFrame successfully uploaded to "
-            f"{require_env('SNOWFLAKE_DATABASE')}.{require_env('SNOWFLAKE_SCHEMA')}.{table_name}"
+        cur.execute("SELECT CURRENT_DATABASE(), CURRENT_SCHEMA(), CURRENT_WAREHOUSE(), CURRENT_ROLE()")
+        result = cur.fetchone()
+        print("Connected to Snowflake:")
+        print(f"Database: {result[0]}")
+        print(f"Schema: {result[1]}")
+        print(f"Warehouse: {result[2]}")
+        print(f"Role: {result[3]}")
+
+        # Drop table if replacing
+        cur.execute(f"DROP TABLE IF EXISTS {database}.{schema}.{table_name}")
+        print(f"Dropped existing table if it existed: {database}.{schema}.{table_name}")
+
+        success, nchunks, nrows, _ = write_pandas(
+            conn=conn,
+            df=df,
+            table_name=table_name,
+            database=database,
+            schema=schema,
+            auto_create_table=True,
+            overwrite=False
         )
+
+        if not success:
+            raise RuntimeError("write_pandas reported failure.")
+
+        print(f"Uploaded {nrows} rows in {nchunks} chunk(s).")
+        print(f"DataFrame successfully uploaded to {database}.{schema}.{table_name}")
+
     finally:
-        if connection is not None:
-            connection.close()
-        engine.dispose()
+        if cur is not None:
+            cur.close()
+        if conn is not None:
+            conn.close()
         print("Snowflake connection closed.")
 
 
